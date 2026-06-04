@@ -1,0 +1,102 @@
+name: Build FocusBlock Windows
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: |
+          pip install pyinstaller pillow
+
+      - name: Generar icono .ico
+        run: |
+          python -c "
+          from PIL import Image, ImageDraw, ImageFont
+          import io
+
+          SIZE = 256
+          img = Image.new('RGBA', (SIZE,SIZE), (0,0,0,0))
+          draw = ImageDraw.Draw(img)
+
+          BG     = (7, 9, 15, 255)
+          PANEL  = (14, 20, 32, 255)
+          ACCENT = (184, 255, 78, 255)
+          TEXT_C = (221, 238, 255, 255)
+
+          def rrect(d,xy,r,fill):
+              x0,y0,x1,y1=xy
+              d.rectangle([x0+r,y0,x1-r,y1],fill=fill)
+              d.rectangle([x0,y0+r,x1,y1-r],fill=fill)
+              for cx,cy in [(x0,y0),(x1-2*r,y0),(x0,y1-2*r),(x1-2*r,y1-2*r)]:
+                  d.ellipse([cx,cy,cx+2*r,cy+2*r],fill=fill)
+
+          rrect(draw,(0,0,SIZE,SIZE),48,BG)
+          rrect(draw,(14,14,SIZE-14,SIZE-14),28,PANEL)
+          draw.rectangle([14,24,20,SIZE-24],fill=ACCENT)
+
+          try:
+              font = ImageFont.truetype('C:/Windows/Fonts/courbd.ttf', 120)
+          except:
+              try:
+                  font = ImageFont.truetype('C:/Windows/Fonts/cour.ttf', 120)
+              except:
+                  font = ImageFont.load_default()
+
+          bb_f = draw.textbbox((0,0),'F',font=font)
+          bb_b = draw.textbbox((0,0),'B',font=font)
+          wf=bb_f[2]-bb_f[0]; wb=bb_b[2]-bb_b[0]; h=bb_f[3]-bb_f[1]
+          total=wf+wb+6
+          x=(SIZE-total)//2; y=(SIZE-h)//2-bb_f[1]
+          draw.text((x-bb_f[0],y),'F',font=font,fill=ACCENT)
+          draw.text((x+wf+6-bb_b[0],y),'B',font=font,fill=TEXT_C)
+
+          dot_r=8; dcx=SIZE-26; dcy=SIZE-26
+          draw.ellipse([dcx-dot_r,dcy-dot_r,dcx+dot_r,dcy+dot_r],fill=ACCENT)
+
+          sizes = [(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)]
+          imgs = [img.resize(s, Image.LANCZOS) for s in sizes]
+          imgs[0].save('FocusBlock.ico', format='ICO', sizes=sizes, append_images=imgs[1:])
+          print('Icono generado')
+          "
+
+      - name: Compilar con PyInstaller
+        run: |
+          pyinstaller `
+            --onefile `
+            --windowed `
+            --name "FocusBlock" `
+            --icon "FocusBlock.ico" `
+            --uac-admin `
+            windows/focus_block.py `
+            --clean `
+            --noconfirm `
+            --log-level WARN
+
+      - name: Subir .exe como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: FocusBlock-Windows
+          path: dist/FocusBlock.exe
+
+      - name: Publicar en Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: v1.0
+          name: FocusBlock v1.0
+          files: dist/FocusBlock.exe
+          token: ${{ secrets.GITHUB_TOKEN }}
