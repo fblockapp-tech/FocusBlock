@@ -23,6 +23,77 @@ _BREVO_SMTP_LOGIN = _b64.b64decode("YWQ4NzJiMDAxQHNtdHAtYnJldm8uY29t").decode()
 _BREVO_KEY        = _b64.b64decode("eHNtdHBzaWItODc5MTM0YmJjN2ZhOGIxNGRlYTAwYjhiY2RkOTVmOGRmYzE0N2EyZDM3MzU4ODI3MjIyZTI1YjYzYmE0ODNlZi1YNTZ3dUdRYmVWTEpaVnBV").decode()
 
 
+
+# ── Firebase (contador desbloqueos de emergencia) ─────────────────────────────
+import urllib.request, urllib.parse, hashlib, platform, datetime
+
+_FB_PROJECT  = "focusblock-695c9"
+_FB_API_KEY  = "AIzaSyDGwW2ld_BHyOQwBIFHonoZRf59GNziAv8"
+_FB_BASE_URL = f"https://firestore.googleapis.com/v1/projects/{_FB_PROJECT}/databases/(default)/documents"
+
+def _get_device_id():
+    """ID único del dispositivo basado en hardware."""
+    raw = platform.node() + platform.machine() + platform.processor()
+    return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+def _fb_get(doc_path):
+    url = f"{_FB_BASE_URL}/{doc_path}?key={_FB_API_KEY}"
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {}  # documento no existe → vacío, no error
+        return None
+    except: return None
+
+def _fb_set(doc_path, data):
+    """Crea o sobreescribe un documento en Firestore."""
+    url = f"{_FB_BASE_URL}/{doc_path}?key={_FB_API_KEY}"
+    # Convertir dict Python a formato Firestore
+    fields = {}
+    for k, v in data.items():
+        if isinstance(v, int):   fields[k] = {"integerValue": str(v)}
+        elif isinstance(v, str): fields[k] = {"stringValue": v}
+    payload = json.dumps({"fields": fields}).encode()
+    req = urllib.request.Request(url, data=payload, method="PATCH",
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+    except: return None
+
+def get_emergency_status():
+    """Devuelve (usos_este_mes, max_usos). None si sin conexión."""
+    device_id = _get_device_id()
+    doc = _fb_get(f"emergency/{device_id}")
+    mes_actual = datetime.datetime.now().strftime("%Y-%m")
+    if doc is None:
+        return None  # sin conexión
+    fields = doc.get("fields", {})  # {} si doc no existe aún → contador en 0
+    mes_guardado = fields.get("mes", {}).get("stringValue", "")
+    usos = int(fields.get("usos", {}).get("integerValue", 0))
+    # Si cambió el mes, resetear
+    if mes_guardado != mes_actual:
+        _fb_set(f"emergency/{device_id}", {"mes": mes_actual, "usos": 0})
+        return 0, 3
+    return usos, 3
+
+def use_emergency():
+    """Consume un uso de emergencia. Devuelve True si OK, False si agotado."""
+    device_id = _get_device_id()
+    mes_actual = datetime.datetime.now().strftime("%Y-%m")
+    status = get_emergency_status()
+    if status is None:
+        return True  # sin conexión → permitir (sin penalización)
+    usos, max_usos = status
+    if usos >= max_usos:
+        return False
+    _fb_set(f"emergency/{device_id}", {"mes": mes_actual, "usos": usos + 1})
+    return True
+
+
 def save_active_code(code):
     import base64
     data = base64.b64encode(code.encode()).decode()
@@ -417,16 +488,54 @@ class App(tk.Tk):
         self.main_btn.grid(row=3, column=0, sticky="ew", padx=PAD, pady=(6, 6))
 
         # ─────────────────────────────────────────
-        # SEPARADOR BREVO
+        # FRAME DINÁMICO (emergencia + email) en row=4
         # ─────────────────────────────────────────
-        _Sep(self, "TU EMAIL DE DESBLOQUEO").grid(
-            row=4, column=0, sticky="ew", padx=PAD, pady=(4, 0))
+        middle_frm = tk.Frame(self, bg=C["bg"])
+        middle_frm.grid(row=4, column=0, sticky="ew")
+        middle_frm.columnconfigure(0, weight=1)
+        # Colapsar cuando esté vacío
+        self._middle_frm = middle_frm
+
+        emg_frm = tk.Frame(middle_frm, bg=C["bg"])
+        emg_frm.pack(fill="x", padx=PAD, pady=(0, 4))
+        emg_frm.columnconfigure(0, weight=1)
+
+        # Card de emergencia — botón grande clicable
+        self.emg_btn = tk.Button(emg_frm,
+            text="🆘  DESBLOQUEO DE EMERGENCIA  —  pulsa aquí para usar (3/mes)",
+            font=("Courier", 11, "bold"),
+            bg=C["panel"], fg=C["orange"],
+            activebackground=C["border2"], activeforeground=C["orange"],
+            relief="flat", bd=0, cursor="hand2",
+            highlightthickness=1,
+            highlightbackground=C["orange"],
+            highlightcolor=C["orange"],
+            pady=14,
+            command=self._emergency_unlock)
+        self.emg_btn.pack(fill="x")
+
+        self._emg_uses_lbl = tk.Label(emg_frm,
+            text="",
+            font=("Courier", 9),
+            bg=C["bg"], fg=C["muted2"])
+        self._emg_uses_lbl.pack(pady=(2,0))
+
+        self._emg_frm = emg_frm
+        self._emg_card = emg_frm
+        emg_frm.pack_forget()  # oculto por defecto
+        middle_frm.grid_remove()  # oculto hasta que haya contenido
+
+        # ─────────────────────────────────────────
+        # SEPARADOR EMAIL (dentro de middle_frm)
+        # ─────────────────────────────────────────
+        self._sep_email = _Sep(middle_frm, "TU EMAIL DE DESBLOQUEO")
+        self._sep_email.pack(fill="x", padx=PAD, pady=(4, 0))
 
         # ─────────────────────────────────────────
         # CAMPOS BREVO
         # ─────────────────────────────────────────
-        brevo_frm = tk.Frame(self, bg=C["bg"])
-        brevo_frm.grid(row=5, column=0, sticky="ew", padx=PAD)
+        brevo_frm = tk.Frame(middle_frm, bg=C["bg"])
+        brevo_frm.pack(fill="x", padx=PAD)
         brevo_frm.columnconfigure(0, weight=1)
 
         def field(parent, row_idx, label, var, show=None):
@@ -451,14 +560,15 @@ class App(tk.Tk):
 
         def _on_dur_change(*_):
             if self.dur_var.get() == "Sin límite (requiere código)":
-                self._email_lbl.grid()
-                self._email_entry.grid()
-                brevo_frm.grid()
-                self.rowconfigure(4, minsize=0)
+                self._sep_email.pack(fill="x", padx=PAD, pady=(4, 0))
+                brevo_frm.pack(fill="x", padx=PAD)
+                self._middle_frm.grid()
             else:
-                self._email_lbl.grid_remove()
-                self._email_entry.grid_remove()
-                brevo_frm.grid_remove()
+                self._sep_email.pack_forget()
+                brevo_frm.pack_forget()
+                # Ocultar middle_frm si tampoco hay emergencia
+                if not self.blocking or not self.timer_run:
+                    self._middle_frm.grid_remove()
         self.dur_var.trace_add("write", _on_dur_change)
         _on_dur_change()  # estado inicial
 
@@ -466,14 +576,14 @@ class App(tk.Tk):
         # SEPARADOR SITIOS
         # ─────────────────────────────────────────
         _Sep(self, "SITIOS BLOQUEADOS").grid(
-            row=6, column=0, sticky="ew", padx=PAD, pady=(6, 0))
+            row=5, column=0, sticky="ew", padx=PAD, pady=(6, 0))
 
         # ─────────────────────────────────────────
         # LISTA DE SITIOS (se expande verticalmente)
         # ─────────────────────────────────────────
         list_frm = tk.Frame(self, bg=C["panel"],
                             highlightbackground=C["border2"], highlightthickness=1)
-        list_frm.grid(row=7, column=0, sticky="nsew", padx=PAD, pady=(0, 4))
+        list_frm.grid(row=6, column=0, sticky="nsew", padx=PAD, pady=(0, 4))
         list_frm.columnconfigure(0, weight=1)
         list_frm.rowconfigure(0, weight=1)
 
@@ -494,7 +604,7 @@ class App(tk.Tk):
         # AÑADIR / QUITAR
         # ─────────────────────────────────────────
         add_frm = tk.Frame(self, bg=C["bg"])
-        add_frm.grid(row=8, column=0, sticky="ew", padx=PAD, pady=(0, 6))
+        add_frm.grid(row=7, column=0, sticky="ew", padx=PAD, pady=(0, 6))
         add_frm.columnconfigure(0, weight=1)
 
         self.new_site_var = tk.StringVar()
@@ -518,7 +628,7 @@ class App(tk.Tk):
         # FOOTER
         # ─────────────────────────────────────────
         footer = tk.Frame(self, bg="#0a0f18")
-        footer.grid(row=9, column=0, sticky="ew")
+        footer.grid(row=8, column=0, sticky="ew")
         footer.columnconfigure(0, weight=1)
 
         tk.Frame(footer, bg=C["border"], height=1).pack(fill="x")
@@ -676,7 +786,14 @@ class App(tk.Tk):
                     text="⏳  ESPERANDO FIN DEL TIEMPO",
                     bg=C["muted"], activebackground=C["muted"],
                     fg=C["bg"], state="disabled")
+                self._emg_frm.pack(fill='x', padx=20, pady=(0,4))
+                self._middle_frm.grid()
+                self.emg_btn.config(state="normal", bg=C["orange"])
+                self.after(100, self._update_emg_label)
             else:
+                self._emg_frm.pack_forget()
+                if self.dur_var.get() != 'Sin límite (requiere código)':
+                    self._middle_frm.grid_remove()
                 self.main_btn.config(
                     text="■  DESACTIVAR BLOQUEO",
                     bg=C["red"], activebackground=C["red_dim"],
@@ -689,6 +806,7 @@ class App(tk.Tk):
             self.main_btn.config(text="▶  ACTIVAR MODO FOCO",
                                  bg=C["accent"], activebackground=C["accent_dim"],
                                  fg=C["bg"], state="normal")
+            self.emg_btn.grid_remove()
 
     def _start_timer(self):
         dur_map = {"25 min – Pomodoro": 1500, "45 min": 2700,
@@ -719,6 +837,69 @@ class App(tk.Tk):
                 self.tlbl.config(text="¡Tiempo completado! Desactivando...")
                 self.after(0, self._deactivate)
         threading.Thread(target=run, daemon=True).start()
+
+    def _update_emg_label(self):
+        """Actualiza el texto de usos restantes en la card de emergencia."""
+        try:
+            status = get_emergency_status()
+            if status is None:
+                self._emg_uses_lbl.config(text="Sin conexión — se permite usar")
+                self.emg_btn.config(state="normal", bg=C["orange"])
+            else:
+                usos, max_usos = status
+                restantes = max_usos - usos
+                if restantes <= 0:
+                    self._emg_uses_lbl.config(
+                        text="Sin usos disponibles este mes", fg=C["red"])
+                    self.emg_btn.config(state="disabled", bg=C["muted"])
+                else:
+                    self._emg_uses_lbl.config(
+                        text=f"{restantes} uso(s) disponible(s) este mes", fg=C["muted2"])
+                    self.emg_btn.config(state="normal", bg=C["orange"])
+        except:
+            self._emg_uses_lbl.config(text="Sin conexión — se permite usar")
+            self.emg_btn.config(state="normal", bg=C["orange"])
+
+    def _emergency_unlock(self):
+        """Desbloqueo de emergencia — máx 3 veces al mes."""
+        if not self.timer_run:
+            return
+        # Consultar Firebase
+        try:
+            status = get_emergency_status()
+            if status is None:
+                # Sin conexión → permitir pero avisar
+                if not messagebox.askyesno("Sin conexión",
+                    "No se pudo verificar tu contador de emergencias.\n"
+                    "Se usará un uso de emergencia de todas formas.\n\n"
+                    "¿Continuar?"):
+                    return
+            else:
+                usos, max_usos = status
+                restantes = max_usos - usos
+                if restantes <= 0:
+                    messagebox.showerror("Sin usos disponibles",
+                        "Has agotado tus 3 desbloqueos de emergencia este mes.\n"
+                        "Se renovarán el 1 del mes que viene.")
+                    return
+                if not messagebox.askyesno("Desbloqueo de emergencia",
+                    f"Te quedan {restantes} desbloqueo(s) de emergencia este mes.\n\n"
+                    "¿Seguro que quieres usar uno ahora?\n"
+                    "Esta acción no se puede deshacer."):
+                    return
+            ok = use_emergency()
+            if not ok:
+                messagebox.showerror("Sin usos disponibles",
+                    "Has agotado tus 3 desbloqueos de emergencia este mes.")
+                return
+        except Exception as ex:
+            if not messagebox.askyesno("Error",
+                f"Error al verificar: {ex}\n¿Continuar de todas formas?"):
+                return
+        # Detener timer y desactivar
+        self.timer_run = False
+        self.emg_btn.grid_remove()
+        self._deactivate()
 
     def _add_site(self):
         if self.blocking:
