@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FocusBlock — Bloquea las distracciones. De verdad.</title>
+<meta name="description" content="FocusBlock bloquea YouTube, Instagram, TikTok y cualquier sitio que te distrae. Sin suscripción. Sin fondo. Sin excusas.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700;800&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #07090f;
+    --panel:    #0e1420;
+    --border:   #1c2a3a;
+    --border2:  #243040;
+    --accent:   #b8ff4e;
+    --accent2:  #7ab832;
+    --red:      #ff4e6a;
+    --text:     #ddeeff;
+    --muted:    #4a6080;
+    --muted2:   #6b7f99;
+    --mono:     'JetBrains Mono', monospace;
+    --display:  'Syne', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    overflow-x: hidden;
+    cursor: default;
+  }
+
+  /* ── Grain overlay ─────────────────────────────────────────────────── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    opacity: .45;
+  }
+
+  /* ── Glow orbs background ──────────────────────────────────────────── */
+  .orb {
+    position: fixed; border-radius: 50%;
+    filter: blur(120px); pointer-events: none; z-index: 0;
+    animation: orb-drift 18s ease-in-out infinite alternate;
+  }
+  .orb-1 { width: 600px; height: 600px; background: #b8ff4e12; top: -200px; left: -200px; }
+  .orb-2 { width: 400px; height: 400px; background: #4eb8ff0a; bottom: 10%; right: -100px; animation-delay: -6s; }
+  .orb-3 { width: 300px; height: 300px; background: #ff4e6a08; top: 40%; left: 30%; animation-delay: -12s; }
+
+  @keyframes orb-drift {
+    from { transform: translate(0, 0) scale(1); }
+    to   { transform: translate(40px, 30px) scale(1.1); }
+  }
+
+  /* ── Nav ───────────────────────────────────────────────────────────── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 40px; height: 64px;
+    background: #07090fcc;
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .nav-logo {
+    font-family: var(--mono); font-weight: 800; font-size: 18px;
+    letter-spacing: -0.5px;
+  }
+  .nav-logo span:first-child { color: var(--accent); }
+  .nav-logo span:last-child  { color: var(--text); }
+
+  .nav-links { display: flex; gap: 32px; }
+  .nav-links a {
+    color: var(--muted2); font-size: 12px; font-weight: 600;
+    letter-spacing: 1px; text-transform: uppercase; text-decoration: none;
+    transition: color .2s;
+  }
+  .nav-links a:hover { color: var(--accent); }
+
+  .nav-cta {
+    background: var(--accent); color: var(--bg);
+    font-family: var(--mono); font-weight: 700; font-size: 12px;
+    letter-spacing: 1px; text-transform: uppercase;
+    padding: 8px 20px; border: none; cursor: pointer;
+    text-decoration: none;
+    transition: background .2s, transform .1s;
+    clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+  }
+  .nav-cta:hover { background: var(--accent2); transform: translateY(-1px); }
+
+  /* ── Hero ──────────────────────────────────────────────────────────── */
+  .hero {
+    position: relative; z-index: 1;
+    min-height: 100vh;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 120px 40px 80px;
+    text-align: center;
+  }
+
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 6px 16px;
+    font-size: 11px; font-weight: 600; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--muted2);
+    margin-bottom: 40px;
+    animation: fade-up .6s ease both;
+  }
+  .hero-badge::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: .5; transform: scale(.8); }
+  }
+
+  .hero-title {
+    font-family: var(--display);
+    font-size: clamp(56px, 10vw, 120px);
+    font-weight: 800; line-height: .95;
+    letter-spacing: -3px;
+    margin-bottom: 32px;
+    animation: fade-up .6s .1s ease both;
+  }
+  .hero-title .focus { color: var(--accent); }
+  .hero-title .block { color: var(--text); }
+  .hero-title .tagline {
+    display: block;
+    font-size: clamp(16px, 2.5vw, 28px);
+    font-family: var(--mono);
+    font-weight: 300;
+    letter-spacing: 2px;
+    color: var(--muted2);
+    margin-top: 16px;
+  }
+
+  .hero-sub {
+    max-width: 560px;
+    font-size: clamp(14px, 1.5vw, 17px);
+    line-height: 1.7;
+    color: var(--muted2);
+    margin-bottom: 56px;
+    animation: fade-up .6s .2s ease both;
+  }
+
+  .hero-sub strong { color: var(--text); font-weight: 600; }
+
+  .download-group {
+    display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;
+    animation: fade-up .6s .3s ease both;
+  }
+
+  .btn-dl {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 32px;
+    font-family: var(--mono); font-weight: 700; font-size: 13px;
+    letter-spacing: .5px; text-decoration: none; cursor: pointer;
+    border: none; transition: all .2s;
+  }
+
+  .btn-dl-mac {
+    background: var(--accent); color: var(--bg);
+    clip-path: polygon(10px 0%, 100% 0%, calc(100% - 10px) 100%, 0% 100%);
+  }
+  .btn-dl-mac:hover {
+    background: var(--accent2); transform: translateY(-2px);
+    box-shadow: 0 12px 40px #b8ff4e30;
+  }
+
+  .btn-dl-win {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border2);
+    clip-path: polygon(10px 0%, 100% 0%, calc(100% - 10px) 100%, 0% 100%);
+  }
+  .btn-dl-win:hover {
+    border-color: var(--accent); color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px #b8ff4e15;
+  }
+
+  .btn-icon { font-size: 20px; }
+
+  .hero-note {
+    margin-top: 20px;
+    font-size: 11px; color: var(--muted); letter-spacing: .5px;
+    animation: fade-up .6s .4s ease both;
+  }
+
+  /* ── Terminal mockup ───────────────────────────────────────────────── */
+  .terminal-wrap {
+    position: relative; z-index: 1;
+    max-width: 780px; margin: 0 auto;
+    padding: 0 40px 100px;
+    animation: fade-up .8s .5s ease both;
+  }
+
+  .terminal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    box-shadow: 0 40px 120px #000a, 0 0 0 1px #b8ff4e10;
+  }
+
+  .terminal-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px;
+    background: #0a1018;
+    border-bottom: 1px solid var(--border);
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot-r { background: #ff5f57; }
+  .dot-y { background: #febc2e; }
+  .dot-g { background: #28c840; }
+  .terminal-title {
+    flex: 1; text-align: center;
+    font-size: 11px; color: var(--muted); letter-spacing: 1px;
+  }
+
+  .terminal-body { padding: 24px 28px; font-size: 13px; line-height: 2; }
+  .t-line { display: flex; gap: 12px; }
+  .t-prompt { color: var(--accent); user-select: none; }
+  .t-cmd    { color: var(--text); }
+  .t-out    { color: var(--muted2); padding-left: 22px; }
+  .t-ok     { color: var(--accent); padding-left: 22px; }
+  .t-err    { color: var(--red);    padding-left: 22px; }
+  .t-blank  { height: 8px; }
+  .cursor {
+    display: inline-block; width: 8px; height: 14px;
+    background: var(--accent); vertical-align: middle;
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ── Divider ───────────────────────────────────────────────────────── */
+  .section-divider {
+    position: relative; z-index: 1;
+    display: flex; align-items: center; gap: 20px;
+    padding: 0 40px; margin-bottom: 80px;
+    max-width: 1100px; margin-left: auto; margin-right: auto;
+  }
+  .section-divider::before,
+  .section-divider::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
+  .section-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 3px;
+    text-transform: uppercase; color: var(--muted); white-space: nowrap;
+  }
+
+  /* ── How it works ──────────────────────────────────────────────────── */
+  .section {
+    position: relative; z-index: 1;
+    max-width: 1100px; margin: 0 auto;
+    padding: 0 40px 100px;
+  }
+
+  .section-title {
+    font-family: var(--display); font-size: clamp(32px, 5vw, 56px);
+    font-weight: 800; letter-spacing: -2px;
+    margin-bottom: 16px;
+  }
+  .section-title span { color: var(--accent); }
+
+  .section-intro {
+    color: var(--muted2); font-size: 15px; max-width: 480px;
+    line-height: 1.7; margin-bottom: 60px;
+  }
+
+  .steps {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 2px;
+  }
+
+  .step {
+    background: var(--panel);
+    padding: 36px 32px;
+    border: 1px solid var(--border);
+    position: relative; overflow: hidden;
+    transition: border-color .2s, transform .2s;
+  }
+  .step:hover { border-color: var(--border2); transform: translateY(-4px); }
+  .step::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--accent); transform: scaleX(0); transform-origin: left;
+    transition: transform .3s;
+  }
+  .step:hover::before { transform: scaleX(1); }
+
+  .step-num {
+    font-size: 11px; font-weight: 700; letter-spacing: 3px;
+    color: var(--accent); text-transform: uppercase; margin-bottom: 16px;
+  }
+  .step-title {
+    font-family: var(--display); font-size: 20px; font-weight: 700;
+    margin-bottom: 12px; color: var(--text);
+  }
+  .step-desc { font-size: 13px; color: var(--muted2); line-height: 1.7; }
+
+  /* ── Features grid ─────────────────────────────────────────────────── */
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1px; background: var(--border);
+    border: 1px solid var(--border);
+    margin-top: 2px;
+  }
+
+  .feature {
+    background: var(--bg);
+    padding: 40px 36px;
+    transition: background .2s;
+  }
+  .feature:hover { background: var(--panel); }
+
+  .feature-icon {
+    font-size: 28px; margin-bottom: 20px;
+    filter: grayscale(0);
+  }
+  .feature-title {
+    font-family: var(--display); font-size: 18px; font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .feature-desc { font-size: 13px; color: var(--muted2); line-height: 1.7; }
+
+  /* ── Sites list ────────────────────────────────────────────────────── */
+  .sites-section {
+    position: relative; z-index: 1;
+    padding: 0 40px 100px;
+    max-width: 1100px; margin: 0 auto;
+  }
+
+  .sites-grid {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-top: 40px;
+  }
+
+  .site-tag {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 6px 14px; font-size: 12px;
+    color: var(--muted2); letter-spacing: .5px;
+    transition: all .2s;
+  }
+  .site-tag:hover {
+    border-color: var(--accent); color: var(--accent);
+    background: #b8ff4e08;
+  }
+  .site-tag.blocked {
+    border-color: var(--red); color: var(--red);
+    background: #ff4e6a08;
+  }
+  .site-tag.blocked::before { content: '✕  '; }
+  .site-more {
+    padding: 6px 14px; font-size: 12px;
+    color: var(--accent); letter-spacing: .5px;
+    border: 1px dashed var(--border2);
+  }
+
+  /* ── Download CTA ──────────────────────────────────────────────────── */
+  .cta-section {
+    position: relative; z-index: 1;
+    padding: 80px 40px 100px;
+    text-align: center;
+    border-top: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .cta-section::before {
+    content: '';
+    position: absolute; top: -200px; left: 50%; transform: translateX(-50%);
+    width: 600px; height: 400px;
+    background: radial-gradient(ellipse, #b8ff4e0f 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .cta-eyebrow {
+    font-size: 11px; font-weight: 700; letter-spacing: 3px;
+    color: var(--accent); text-transform: uppercase; margin-bottom: 24px;
+  }
+
+  .cta-title {
+    font-family: var(--display);
+    font-size: clamp(36px, 6vw, 72px);
+    font-weight: 800; letter-spacing: -2px;
+    margin-bottom: 20px; line-height: 1;
+  }
+
+  .cta-sub {
+    color: var(--muted2); font-size: 15px;
+    max-width: 420px; margin: 0 auto 48px;
+    line-height: 1.7;
+  }
+
+  .platforms {
+    display: flex; gap: 16px; justify-content: center;
+    flex-wrap: wrap; margin-bottom: 24px;
+  }
+
+  .platform-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 28px 40px;
+    min-width: 220px;
+    text-align: center; cursor: pointer;
+    text-decoration: none;
+    transition: all .2s;
+    display: block;
+  }
+  .platform-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px #b8ff4e18;
+  }
+  .platform-card .p-icon { font-size: 32px; margin-bottom: 12px; }
+  .platform-card .p-os {
+    font-family: var(--display); font-size: 18px;
+    font-weight: 700; margin-bottom: 6px;
+  }
+  .platform-card .p-req {
+    font-size: 11px; color: var(--muted); letter-spacing: .5px;
+  }
+  .platform-card .p-dl {
+    margin-top: 16px; padding: 8px 20px;
+    background: var(--accent); color: var(--bg);
+    font-family: var(--mono); font-weight: 700; font-size: 11px;
+    letter-spacing: 1px; text-transform: uppercase;
+    display: inline-block;
+  }
+  .platform-card:hover .p-dl { background: var(--accent2); }
+
+  .cta-note { font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+  /* ── Footer ────────────────────────────────────────────────────────── */
+  footer {
+    position: relative; z-index: 1;
+    border-top: 1px solid var(--border);
+    padding: 40px;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 16px;
+  }
+
+  .footer-logo { font-weight: 800; font-size: 14px; }
+  .footer-logo span:first-child { color: var(--accent); }
+
+  .footer-links { display: flex; gap: 24px; }
+  .footer-links a {
+    font-size: 11px; color: var(--muted);
+    text-decoration: none; letter-spacing: .5px;
+    text-transform: uppercase; transition: color .2s;
+  }
+  .footer-links a:hover { color: var(--text); }
+
+  .footer-copy { font-size: 11px; color: var(--muted); }
+
+  /* ── Animations ────────────────────────────────────────────────────── */
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(24px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .reveal {
+    opacity: 0; transform: translateY(32px);
+    transition: opacity .7s ease, transform .7s ease;
+  }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  /* ── Scrollbar ─────────────────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  /* ── Mobile ────────────────────────────────────────────────────────── */
+  @media (max-width: 640px) {
+    nav { padding: 0 20px; }
+    .nav-links { display: none; }
+    .hero { padding: 100px 24px 60px; }
+    .section, .sites-section { padding-left: 24px; padding-right: 24px; }
+    .terminal-wrap { padding: 0 24px 80px; }
+    .cta-section { padding: 60px 24px 80px; }
+    footer { padding: 32px 24px; flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Orbs -->
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+<div class="orb orb-3"></div>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-logo"><span>FOCUS</span><span>BLOCK</span></div>
+  <div class="nav-links">
+    <a href="#como-funciona">Cómo funciona</a>
+    <a href="#funciones">Funciones</a>
+    <a href="#descargar">Descargar</a>
+  </div>
+  <a href="#descargar" class="nav-cta">Descargar gratis</a>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-badge">Disponible para macOS y Windows</div>
+
+  <h1 class="hero-title">
+    <span class="focus">FOCUS</span><span class="block">BLOCK</span>
+    <span class="tagline">Bloquea las distracciones. De verdad.</span>
+  </h1>
+
+  <p class="hero-sub">
+    FocusBlock modifica tu archivo <strong>hosts</strong> para bloquear YouTube,
+    Instagram, TikTok y cualquier sitio que te robe el tiempo.
+    Sin suscripción. Sin procesos en segundo plano.
+    <strong>Con código de desbloqueo por email</strong> para que no puedas hacer trampa.
+  </p>
+
+  <div class="download-group">
+    <a href="#descargar" class="btn-dl btn-dl-mac">
+      <span class="btn-icon"></span>
+      Descargar para macOS
+    </a>
+    <a href="#descargar" class="btn-dl btn-dl-win">
+      <span class="btn-icon">⊞</span>
+      Descargar para Windows
+    </a>
+  </div>
+
+  <p class="hero-note">Gratis · Sin registro · Código abierto · Python 3 requerido</p>
+</section>
+
+<!-- Terminal mockup -->
+<div class="terminal-wrap reveal">
+  <div class="terminal">
+    <div class="terminal-bar">
+      <div class="dot dot-r"></div>
+      <div class="dot dot-y"></div>
+      <div class="dot dot-g"></div>
+      <span class="terminal-title">focusblock — hosts — bash</span>
+    </div>
+    <div class="terminal-body">
+      <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">focusblock --activate --duration 25m</span></div>
+      <div class="t-ok">  ✓ Código enviado a tu@email.com</div>
+      <div class="t-ok">  ✓ Bloqueando 28 dominios...</div>
+      <div class="t-blank"></div>
+      <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">cat /etc/hosts | grep youtube</span></div>
+      <div class="t-out">  127.0.0.1  youtube.com</div>
+      <div class="t-out">  127.0.0.1  www.youtube.com</div>
+      <div class="t-out">  127.0.0.1  m.youtube.com</div>
+      <div class="t-blank"></div>
+      <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">focusblock --deactivate</span></div>
+      <div class="t-out">  Introduce el código de desbloqueo: <span class="cursor"></span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Divider -->
+<div class="section-divider reveal" id="como-funciona">
+  <span class="section-label">// Cómo funciona</span>
+</div>
+
+<!-- Steps -->
+<section class="section reveal">
+  <h2 class="section-title">Simple. <span>Efectivo.</span> Sin trucos.</h2>
+  <p class="section-intro">
+    No instala extensiones, no crea procesos en segundo plano,
+    no necesita internet para funcionar. Solo modifica un archivo del sistema.
+  </p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">// 01</div>
+      <div class="step-title">Descarga y abre</div>
+      <div class="step-desc">
+        Descarga el archivo, ejecuta el instalador y abre FocusBlock
+        desde tu Escritorio. Solo necesitas Python 3 instalado.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">// 02</div>
+      <div class="step-title">Pon tu email</div>
+      <div class="step-desc">
+        Introduce el email donde quieres recibir el código de desbloqueo.
+        Puede ser cualquier cuenta: Gmail, Outlook, lo que uses.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">// 03</div>
+      <div class="step-title">Activa el foco</div>
+      <div class="step-desc">
+        Elige la duración (o sin límite) y pulsa Activar.
+        Los sitios quedan bloqueados instantáneamente en todos los navegadores.
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">// 04</div>
+      <div class="step-title">El código te frena</div>
+      <div class="step-desc">
+        Para desactivar necesitas el código que llegó a tu email.
+        Si el móvil también está lejos... no hay escapatoria.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Divider -->
+<div class="section-divider reveal" id="funciones">
+  <span class="section-label">// Funciones</span>
+</div>
+
+<!-- Features -->
+<section class="section reveal">
+  <h2 class="section-title">Todo lo que <span>necesitas.</span></h2>
+  <p class="section-intro">Nada más. Nada menos.</p>
+
+  <div class="features">
+    <div class="feature">
+      <div class="feature-icon">🔒</div>
+      <div class="feature-title">Bloqueo real a nivel de sistema</div>
+      <div class="feature-desc">
+        Modifica el archivo <code style="color:var(--accent);font-size:12px">hosts</code> del sistema operativo.
+        Funciona en Chrome, Firefox, Safari, Edge y cualquier app que use DNS.
+      </div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">📧</div>
+      <div class="feature-title">Código de desbloqueo por email</div>
+      <div class="feature-desc">
+        Al activar, se envía un código a tu correo. Sin él, no puedes
+        desactivar el bloqueo. El sistema te protege de ti mismo.
+      </div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">⏱</div>
+      <div class="feature-title">Temporizador Pomodoro</div>
+      <div class="feature-desc">
+        25 min, 45 min, 1h, 2h, 4h o sin límite. Al acabar el tiempo,
+        el bloqueo se desactiva automáticamente.
+      </div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">✏️</div>
+      <div class="feature-title">Lista personalizable</div>
+      <div class="feature-desc">
+        Añade o quita cualquier dominio. La lista se guarda localmente
+        en tu ordenador. Tus datos no salen de tu máquina.
+      </div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">🖥</div>
+      <div class="feature-title">macOS y Windows</div>
+      <div class="feature-desc">
+        Versión nativa para macOS (11+) y Windows 10/11.
+        Misma experiencia, mismo diseño, en ambos sistemas.
+      </div>
+    </div>
+    <div class="feature">
+      <div class="feature-icon">🔍</div>
+      <div class="feature-title">Código abierto y auditable</div>
+      <div class="feature-desc">
+        El código fuente es Python puro, visible y auditable.
+        No hay binarios opacos ni procesos ocultos.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Sites blocked -->
+<section class="sites-section reveal">
+  <div class="section-divider" style="padding:0;margin-bottom:60px">
+    <span class="section-label">// Bloqueado por defecto</span>
+    <div style="flex:1;height:1px;background:var(--border)"></div>
+  </div>
+
+  <div class="sites-grid">
+    <span class="site-tag blocked">YouTube</span>
+    <span class="site-tag blocked">Instagram</span>
+    <span class="site-tag blocked">TikTok</span>
+    <span class="site-tag blocked">Twitter / X</span>
+    <span class="site-tag blocked">Facebook</span>
+    <span class="site-tag blocked">Reddit</span>
+    <span class="site-tag blocked">Twitch</span>
+    <span class="site-tag blocked">Netflix</span>
+    <span class="site-tag blocked">9GAG</span>
+    <span class="site-tag blocked">Poki</span>
+    <span class="site-tag blocked">Miniclip</span>
+    <span class="site-tag blocked">Kongregate</span>
+    <span class="site-more">+ cualquier dominio que añadas tú</span>
+  </div>
+</section>
+
+<!-- Download CTA -->
+<section class="cta-section reveal" id="descargar">
+  <div class="cta-eyebrow">// Descarga gratuita</div>
+  <h2 class="cta-title">Empieza a enfocarte<br>hoy.</h2>
+  <p class="cta-sub">
+    Sin cuenta. Sin suscripción. Sin anuncios.
+    Solo tú, tu trabajo y ninguna distracción.
+  </p>
+
+  <div class="platforms">
+    <a href="focusblock_mac.zip" class="platform-card" download>
+      <div class="p-icon"></div>
+      <div class="p-os">macOS</div>
+      <div class="p-req">macOS 11 · Python 3</div>
+      <div class="p-dl">Descargar .zip</div>
+    </a>
+    <a href="focusblock_windows.zip" class="platform-card" download>
+      <div class="p-icon">⊞</div>
+      <div class="p-os">Windows</div>
+      <div class="p-req">Windows 10/11 · Python 3</div>
+      <div class="p-dl">Descargar .zip</div>
+    </a>
+  </div>
+
+  <p class="cta-note">
+    ¿No tienes Python?
+    <a href="https://www.python.org/downloads/" target="_blank"
+       style="color:var(--accent);text-decoration:none">
+      Descárgalo gratis aquí →
+    </a>
+  </p>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="footer-logo"><span>FOCUS</span><span style="color:var(--text)">BLOCK</span></div>
+  <div class="footer-links">
+    <a href="#como-funciona">Cómo funciona</a>
+    <a href="#descargar">Descargar</a>
+    <a href="mailto:hola@focusblock.app">Contacto</a>
+  </div>
+  <div class="footer-copy">focusblock.app · Gratis para siempre</div>
+</footer>
+
+<script>
+  // Scroll reveal
+  const reveals = document.querySelectorAll('.reveal');
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach((e, i) => {
+      if (e.isIntersecting) {
+        setTimeout(() => e.target.classList.add('visible'), i * 80);
+        observer.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.1 });
+  reveals.forEach(el => observer.observe(el));
+
+  // Terminal typewriter
+  const lines = document.querySelectorAll('.t-cmd');
+  lines.forEach((line, i) => {
+    const text = line.textContent;
+    line.textContent = '';
+    let j = 0;
+    setTimeout(() => {
+      const interval = setInterval(() => {
+        line.textContent += text[j++];
+        if (j >= text.length) clearInterval(interval);
+      }, 28);
+    }, 800 + i * 600);
+  });
+</script>
+</body>
+</html>
