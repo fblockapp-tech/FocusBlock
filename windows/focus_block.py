@@ -40,6 +40,77 @@ if not is_admin():
     relaunch_as_admin()
 
 # ── Código de desbloqueo ──────────────────────────────────────────────────────
+
+# ── Firebase (contador desbloqueos de emergencia) ─────────────────────────────
+import urllib.request, urllib.parse, hashlib, platform, datetime
+
+_FB_PROJECT  = "focusblock-695c9"
+_FB_API_KEY  = "AIzaSyDGwW2ld_BHyOQwBIFHonoZRf59GNziAv8"
+_FB_BASE_URL = f"https://firestore.googleapis.com/v1/projects/{_FB_PROJECT}/databases/(default)/documents"
+
+def _get_device_id():
+    """ID único del dispositivo basado en hardware."""
+    raw = platform.node() + platform.machine() + platform.processor()
+    return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+def _fb_get(doc_path):
+    url = f"{_FB_BASE_URL}/{doc_path}?key={_FB_API_KEY}"
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {}  # documento no existe → vacío, no error
+        return None
+    except: return None
+
+def _fb_set(doc_path, data):
+    """Crea o sobreescribe un documento en Firestore."""
+    url = f"{_FB_BASE_URL}/{doc_path}?key={_FB_API_KEY}"
+    # Convertir dict Python a formato Firestore
+    fields = {}
+    for k, v in data.items():
+        if isinstance(v, int):   fields[k] = {"integerValue": str(v)}
+        elif isinstance(v, str): fields[k] = {"stringValue": v}
+    payload = json.dumps({"fields": fields}).encode()
+    req = urllib.request.Request(url, data=payload, method="PATCH",
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+    except: return None
+
+def get_emergency_status():
+    """Devuelve (usos_este_mes, max_usos). None si sin conexión."""
+    device_id = _get_device_id()
+    doc = _fb_get(f"emergency/{device_id}")
+    mes_actual = datetime.datetime.now().strftime("%Y-%m")
+    if doc is None:
+        return None  # sin conexión
+    fields = doc.get("fields", {})  # {} si doc no existe aún → contador en 0
+    mes_guardado = fields.get("mes", {}).get("stringValue", "")
+    usos = int(fields.get("usos", {}).get("integerValue", 0))
+    # Si cambió el mes, resetear
+    if mes_guardado != mes_actual:
+        _fb_set(f"emergency/{device_id}", {"mes": mes_actual, "usos": 0})
+        return 0, 3
+    return usos, 3
+
+def use_emergency():
+    """Consume un uso de emergencia. Devuelve True si OK, False si agotado."""
+    device_id = _get_device_id()
+    mes_actual = datetime.datetime.now().strftime("%Y-%m")
+    status = get_emergency_status()
+    if status is None:
+        return True  # sin conexión → permitir (sin penalización)
+    usos, max_usos = status
+    if usos >= max_usos:
+        return False
+    _fb_set(f"emergency/{device_id}", {"mes": mes_actual, "usos": usos + 1})
+    return True
+
+
 def save_active_code(code):
     import base64
     data = base64.b64encode(code.encode()).decode()
@@ -264,8 +335,9 @@ class App(tk.Tk):
     def _build(self):
         PAD = 20
         self.columnconfigure(0, weight=1)
-        for r, w in enumerate([0,0,0,0,0,0,0,1,0,0]):
-            self.rowconfigure(r, weight=w)
+        for r in range(9):
+            self.rowconfigure(r, weight=0, minsize=0)
+        self.rowconfigure(6, weight=1)
 
         # HEADER
         hdr = tk.Frame(self, bg="#0a0f18")
@@ -357,6 +429,18 @@ class App(tk.Tk):
             command=self._toggle)
         self.main_btn.grid(row=3, column=0, sticky="ew", padx=PAD, pady=(6, 6))
 
+        # EMERGENCIA
+        self.emg_btn = tk.Button(self,
+            text="DESBLOQUEO DE EMERGENCIA  (3 usos/mes)",
+            font=("Courier", 10),
+            bg=C["panel"], fg=C["orange"],
+            activebackground=C["border2"], activeforeground=C["orange"],
+            relief="flat", bd=0, cursor="hand2",
+            highlightthickness=1, highlightbackground=C["border"],
+            command=self._emergency_unlock)
+        self.emg_btn.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 6))
+        self.emg_btn.grid_remove()
+
         # BREVO
         _Sep(self, "TU EMAIL DE DESBLOQUEO").grid(
             row=4, column=0, sticky="ew", padx=PAD, pady=(4, 0))
@@ -376,15 +460,35 @@ class App(tk.Tk):
             return e
 
         self.email_to_var = tk.StringVar(value=self.cfg.get("email_to", ""))
-        field(brevo_frm, 0, "TU EMAIL  (aqui recibiras el codigo de desbloqueo)", self.email_to_var)
+        self._email_lbl = tk.Label(brevo_frm,
+            text="TU EMAIL  (solo necesario para 'Sin limite')",
+            font=("Courier", 8, "bold"), bg=C["bg"], fg=C["muted2"])
+        self._email_lbl.grid(row=0, column=0, sticky="w", pady=(6, 0))
+        kw_e = _entry_style()
+        kw_e["textvariable"] = self.email_to_var
+        self._email_entry = tk.Entry(brevo_frm, **kw_e)
+        self._email_entry.grid(row=1, column=0, sticky="ew", ipady=4)
+
+        def _on_dur_change(*_):
+            if self.dur_var.get() == "Sin limite (requiere codigo)":
+                self._sep_email.pack(fill="x", padx=PAD, pady=(4, 0))
+                brevo_frm.pack(fill="x", padx=PAD)
+                self._middle_frm.grid()
+            else:
+                self._sep_email.pack_forget()
+                brevo_frm.pack_forget()
+                if not self.blocking or not self.timer_run:
+                    self._middle_frm.grid_remove()
+        self.dur_var.trace_add("write", _on_dur_change)
+        _on_dur_change()
 
         # SITIOS
         _Sep(self, "SITIOS BLOQUEADOS").grid(
-            row=6, column=0, sticky="ew", padx=PAD, pady=(6, 0))
+            row=5, column=0, sticky="ew", padx=PAD, pady=(6, 0))
 
         list_frm = tk.Frame(self, bg=C["panel"],
                             highlightbackground=C["border2"], highlightthickness=1)
-        list_frm.grid(row=7, column=0, sticky="nsew", padx=PAD, pady=(0, 4))
+        list_frm.grid(row=6, column=0, sticky="nsew", padx=PAD, pady=(0, 4))
         list_frm.columnconfigure(0, weight=1)
         list_frm.rowconfigure(0, weight=1)
 
@@ -403,7 +507,7 @@ class App(tk.Tk):
 
         # AÑADIR / QUITAR
         add_frm = tk.Frame(self, bg=C["bg"])
-        add_frm.grid(row=8, column=0, sticky="ew", padx=PAD, pady=(0, 6))
+        add_frm.grid(row=7, column=0, sticky="ew", padx=PAD, pady=(0, 6))
         add_frm.columnconfigure(0, weight=1)
 
         self.new_site_var = tk.StringVar()
@@ -425,7 +529,7 @@ class App(tk.Tk):
 
         # FOOTER
         footer = tk.Frame(self, bg="#0a0f18")
-        footer.grid(row=9, column=0, sticky="ew")
+        footer.grid(row=8, column=0, sticky="ew")
         footer.columnconfigure(0, weight=1)
         tk.Frame(footer, bg=C["border"], height=1).pack(fill="x")
         tk.Label(footer,
@@ -448,35 +552,31 @@ class App(tk.Tk):
 
     def _activate(self):
         self._save_cfg()
-        email_to = self.cfg["email_to"]
+        dur        = self.dur_var.get()
+        email_to   = self.cfg["email_to"]
+        sin_limite = (dur == "Sin limite (requiere codigo)")
 
-        if not email_to:
-            messagebox.showwarning("Email requerido",
-                "Introduce tu email destino antes de activar.")
-            return
-
-        code = generate_code()
-        try:
-            send_brevo_email(email_to, code)
-            self.active_code = code
-            save_active_code(code)
-            messagebox.showinfo("Codigo enviado",
-                f"Codigo enviado a {email_to}\nGuardalo para poder desactivar.")
-        except Exception as ex:
-            dur = self.dur_var.get()
-            if dur == "Sin limite (requiere codigo)":
-                messagebox.showerror("Sin conexion — duracion requerida",
-                    f"No se pudo enviar el codigo:\n{ex}\n\n"
-                    "Sin codigo de email no puedes activar 'Sin limite'\n"
-                    "porque no habria forma de desbloquear.\n\n"
-                    "Elige una duracion (25 min, 1 hora, etc.) e intentalo de nuevo.")
-                return
-            if not messagebox.askyesno("Error al enviar",
-                f"No se pudo enviar el codigo:\n{ex}\n\n"
-                f"Se activara por {dur} y se desactivara solo al acabar el tiempo.\n"
-                "¿Continuar?"):
-                return
+        if not sin_limite:
             self.active_code = None
+        else:
+            if not email_to:
+                messagebox.showwarning("Email requerido",
+                    "Para 'Sin limite' introduce tu email.\n"
+                    "Te enviaremos el codigo para poder desactivar.")
+                return
+            code = generate_code()
+            try:
+                send_brevo_email(email_to, code)
+                self.active_code = code
+                save_active_code(code)
+                messagebox.showinfo("Codigo enviado",
+                    f"Codigo enviado a {email_to}\nGuardalo para poder desactivar.")
+            except Exception as ex:
+                messagebox.showerror("Error al enviar",
+                    f"No se pudo enviar el codigo:\n{ex}\n\n"
+                    "Sin codigo no puedes usar 'Sin limite'.\n"
+                    "Elige una duracion fija o revisa tu conexion.")
+                return
 
         self.main_btn.config(state="disabled", text="Activando...")
         self.update()
@@ -566,34 +666,101 @@ class App(tk.Tk):
             self._status_bar.config(bg=C["accent"])
             self._dot_canvas.itemconfig(self._dot, fill=C["accent"])
             self.slbl.config(text="MODO FOCO ACTIVO", fg=C["accent"])
-            self.main_btn.config(text="■  DESACTIVAR BLOQUEO",
-                                 bg=C["red"], activebackground=C["red_dim"], fg=C["white"])
+            if self.timer_run:
+                self.main_btn.config(
+                    text="ESPERANDO FIN DEL TIEMPO",
+                    bg=C["muted"], activebackground=C["muted"],
+                    fg=C["bg"], state="disabled")
+                self.emg_btn.config(state="normal", bg=C["orange"])
+                self._emg_frm.grid()
+                self._middle_frm.grid_remove()
+                self.after(100, self._update_emg_label)
+            else:
+                self._emg_frm.grid_remove()
+                self.main_btn.config(
+                    text="DESACTIVAR BLOQUEO",
+                    bg=C["red"], activebackground=C["red_dim"],
+                    fg=C["white"], state="normal")
         else:
             self._status_bar.config(bg=C["muted"])
             self._dot_canvas.itemconfig(self._dot, fill=C["muted"])
             self.slbl.config(text="INACTIVO", fg=C["muted"])
             self.tlbl.config(text="Activa el modo foco para comenzar", fg=C["muted"])
-            self.main_btn.config(text="►  ACTIVAR MODO FOCO",
-                                 bg=C["accent"], activebackground=C["accent_dim"], fg=C["bg"])
+            self.main_btn.config(text="ACTIVAR MODO FOCO",
+                                 bg=C["accent"], activebackground=C["accent_dim"],
+                                 fg=C["bg"], state="normal")
+            self._emg_frm.grid_remove()
+            self._middle_frm.grid_remove()
 
     def _start_timer(self):
         dur_map = {"25 min - Pomodoro": 1500, "45 min": 2700,
                    "1 hora": 3600, "2 horas": 7200, "4 horas": 14400}
         secs = dur_map.get(self.dur_var.get(), 0)
         if secs == 0:
-            self.tlbl.config(text="Duracion: sin limite  —  solo desactivable por codigo", fg=C["muted"]); return
+            self.main_btn.config(
+                text="DESACTIVAR BLOQUEO",
+                bg=C["red"], activebackground=C["red_dim"],
+                fg=C["white"], state="normal")
+            self.tlbl.config(text="Duracion: sin limite  —  solo desactivable por codigo", fg=C["muted"])
+            return
             self.tlbl.config(text="Duracion: sin limite", fg=C["muted"]); return
         self.timer_secs = secs
         self.timer_run  = True
+        self.main_btn.config(
+            text="ESPERANDO FIN DEL TIEMPO",
+            bg=C["muted"], activebackground=C["muted"],
+            fg=C["bg"], state="disabled")
         def run():
             while self.timer_run and self.timer_secs > 0:
                 m, s = divmod(self.timer_secs, 60)
                 self.tlbl.config(text=f"Tiempo restante: {m:02d}:{s:02d}", fg=C["accent"])
                 time.sleep(1); self.timer_secs -= 1
             if self.timer_run:
-                self.tlbl.config(text="Tiempo completado!")
+                self.timer_run = False
+                self.tlbl.config(text="Tiempo completado! Desactivando...")
                 self.after(0, self._deactivate)
         threading.Thread(target=run, daemon=True).start()
+
+    def _emergency_unlock(self):
+        """Desbloqueo de emergencia — máx 3 veces al mes."""
+        if not self.timer_run:
+            return
+        # Consultar Firebase
+        try:
+            status = get_emergency_status()
+            if status is None:
+                # Sin conexión → permitir pero avisar
+                if not messagebox.askyesno("Sin conexión",
+                    "No se pudo verificar tu contador de emergencias.\n"
+                    "Se usará un uso de emergencia de todas formas.\n\n"
+                    "¿Continuar?"):
+                    return
+            else:
+                usos, max_usos = status
+                restantes = max_usos - usos
+                if restantes <= 0:
+                    messagebox.showerror("Sin usos disponibles",
+                        "Has agotado tus 3 desbloqueos de emergencia este mes.\n"
+                        "Se renuevan el 1 del mes que viene.")
+                    return
+                if not messagebox.askyesno("Desbloqueo de emergencia",
+                    f"Te quedan {restantes} desbloqueo(s) de emergencia este mes.\n\n"
+                    "¿Seguro que quieres usar uno ahora?\n"
+                    "Esta acción no se puede deshacer."):
+                    return
+            ok = use_emergency()
+            if not ok:
+                messagebox.showerror("Sin usos disponibles",
+                    "Has agotado tus 3 desbloqueos de emergencia este mes.")
+                return
+        except Exception as ex:
+            if not messagebox.askyesno("Error",
+                f"Error al verificar: {ex}\n¿Continuar de todas formas?"):
+                return
+        # Detener timer y desactivar
+        self.timer_run = False
+        self.emg_btn.grid_remove()
+        self._deactivate()
 
     def _add_site(self):
         if self.blocking:
