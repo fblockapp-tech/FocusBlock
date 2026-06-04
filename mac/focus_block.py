@@ -670,31 +670,53 @@ class App(tk.Tk):
             self._status_bar.config(bg=C["accent"])
             self._dot_canvas.itemconfig(self._dot, fill=C["accent"])
             self.slbl.config(text="MODO FOCO ACTIVO", fg=C["accent"])
-            self.main_btn.config(text="■  DESACTIVAR BLOQUEO",
-                                 bg=C["red"], activebackground=C["red_dim"], fg=C["white"])
+            # Si hay timer activo (duración fija) → botón bloqueado
+            if self.timer_run:
+                self.main_btn.config(
+                    text="⏳  ESPERANDO FIN DEL TIEMPO",
+                    bg=C["muted"], activebackground=C["muted"],
+                    fg=C["bg"], state="disabled")
+            else:
+                self.main_btn.config(
+                    text="■  DESACTIVAR BLOQUEO",
+                    bg=C["red"], activebackground=C["red_dim"],
+                    fg=C["white"], state="normal")
         else:
             self._status_bar.config(bg=C["muted"])
             self._dot_canvas.itemconfig(self._dot, fill=C["muted"])
             self.slbl.config(text="INACTIVO", fg=C["muted"])
             self.tlbl.config(text="Activa el modo foco para comenzar", fg=C["muted"])
             self.main_btn.config(text="▶  ACTIVAR MODO FOCO",
-                                 bg=C["accent"], activebackground=C["accent_dim"], fg=C["bg"])
+                                 bg=C["accent"], activebackground=C["accent_dim"],
+                                 fg=C["bg"], state="normal")
 
     def _start_timer(self):
         dur_map = {"25 min – Pomodoro": 1500, "45 min": 2700,
                    "1 hora": 3600, "2 horas": 7200, "4 horas": 14400}
         secs = dur_map.get(self.dur_var.get(), 0)
         if secs == 0:
-            self.tlbl.config(text="Duración: sin límite  —  solo desactivable por código", fg=C["muted"]); return
+            # Sin límite: botón habilitado (se desactiva con código)
+            self.main_btn.config(
+                text="■  DESACTIVAR BLOQUEO",
+                bg=C["red"], activebackground=C["red_dim"],
+                fg=C["white"], state="normal")
+            self.tlbl.config(text="Duración: sin límite  —  solo desactivable por código", fg=C["muted"])
+            return
         self.timer_secs = secs
         self.timer_run  = True
+        # Deshabilitar botón inmediatamente
+        self.main_btn.config(
+            text="⏳  ESPERANDO FIN DEL TIEMPO",
+            bg=C["muted"], activebackground=C["muted"],
+            fg=C["bg"], state="disabled")
         def run():
             while self.timer_run and self.timer_secs > 0:
                 m, s = divmod(self.timer_secs, 60)
                 self.tlbl.config(text=f"Tiempo restante: {m:02d}:{s:02d}", fg=C["accent"])
                 time.sleep(1); self.timer_secs -= 1
             if self.timer_run:
-                self.tlbl.config(text="¡Tiempo completado!")
+                self.timer_run = False
+                self.tlbl.config(text="¡Tiempo completado! Desactivando...")
                 self.after(0, self._deactivate)
         threading.Thread(target=run, daemon=True).start()
 
