@@ -441,12 +441,17 @@ class App(tk.Tk):
         self.emg_btn.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 6))
         self.emg_btn.grid_remove()
 
-        # BREVO
-        _Sep(self, "TU EMAIL DE DESBLOQUEO").grid(
-            row=4, column=0, sticky="ew", padx=PAD, pady=(4, 0))
+        # FRAME DINÁMICO email
+        middle_frm = tk.Frame(self, bg=C["bg"])
+        middle_frm.grid(row=4, column=0, sticky="ew")
+        middle_frm.columnconfigure(0, weight=1)
+        self._middle_frm = middle_frm
 
-        brevo_frm = tk.Frame(self, bg=C["bg"])
-        brevo_frm.grid(row=5, column=0, sticky="ew", padx=PAD)
+        self._sep_email = _Sep(middle_frm, "TU EMAIL DE DESBLOQUEO")
+        self._sep_email.pack(fill="x", padx=PAD, pady=(4, 0))
+
+        brevo_frm = tk.Frame(middle_frm, bg=C["bg"])
+        brevo_frm.pack(fill="x", padx=PAD)
         brevo_frm.columnconfigure(0, weight=1)
 
         def field(parent, row_idx, label, var, show=None):
